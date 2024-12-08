@@ -55,7 +55,7 @@ for STACK in $STACKS; do
     mkdir -p "$STACK_DIR"
 
     # 1. Exportando a configuração JSON da stack
-    CONFIG=$(curl -s -H "Authorization: Bearer $TOKEN" "$PORTAINER_HOST/api/stacks/$STACK_ID/file" | jq .)
+    CONFIG=$(curl -s -H "Authorization: Bearer $TOKEN" "$PORTAINER_HOST/api/stacks/$STACK_ID/file" | jq -c .)
     
     if [ -n "$CONFIG" ]; then
         echo "$CONFIG" > "$STACK_DIR/${STACK_NAME}_config_$DATE.json"
