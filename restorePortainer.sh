@@ -1,105 +1,165 @@
 #!/bin/bash
 
-# Configurações
-PORTAINER_HOST="https://painel.teste.com.br"  # Altere para o host do seu Portainer
+# Função para exibir ajuda caso o usuário não forneça o nome do arquivo
+function show_help {
+    echo "Uso: $0 <arquivo_de_backup.enc>"
+    echo "Exemplo: $0 BackupDocker_20231201_123456.zip.enc"
+    exit 1
+}
+
+# Verificar se o nome do arquivo foi passado como argumento
+if [ $# -ne 1 ]; then
+    echo "Erro: Nenhum arquivo de backup foi fornecido."
+    show_help
+fi
+
+# Variáveis de Configuração
+ENCRYPTED_FILE="$1" # Nome do arquivo de backup passado como argumento
+PASSWORDENC="${PASSWORDENC:-calambinha}"
+UNZIP_DIR="RestoredDocker"
+DEST_DIR="/root/${UNZIP_DIR}"
+PORTAINER_HOST="http://localhost:9000" # Altere para o novo host do Portainer
 USERNAME="${USERNAME:-nick}"
 PASSWORD="${PASSWORD:-!\$boré}"
-ENCRYPTED_BACKUP="$1"  # Caminho para o arquivo de backup criptografado
-RESTORE_DIR="/root/RestorePortainer"
-PASSWORDENC="${PASSWORDENC:-calambinha}"  # Usa a variável de ambiente para a senha de criptografia
 
-# Verifica se o arquivo criptografado foi fornecido
-if [ -z "$ENCRYPTED_BACKUP" ]; then
-    echo "Uso: $0 <caminho_para_o_arquivo_criptografado>"
+# Verificar se o arquivo de backup existe
+if [ ! -f "$ENCRYPTED_FILE" ]; then
+    echo "Erro: O arquivo '$ENCRYPTED_FILE' não foi encontrado."
     exit 1
 fi
 
-# Cria o diretório de restauração se não existir
-mkdir -p "$RESTORE_DIR"
+# Criar diretório de destino se não existir
+mkdir -p "$DEST_DIR"
 
-# Descriptografa o arquivo de backup
-DECRYPTED_FILE="${RESTORE_DIR}/backup_restaurado.zip"
-openssl enc -d -aes-256-cbc -pbkdf2 -k "$PASSWORDENC" -in "$ENCRYPTED_BACKUP" -out "$DECRYPTED_FILE" || { echo "Erro ao descriptografar o arquivo."; exit 1; }
-echo "Arquivo descriptografado com sucesso."
+# Descriptografar o arquivo de backup
+echo "Descriptografando o arquivo: $ENCRYPTED_FILE..."
+openssl enc -aes-256-cbc -d -salt -pbkdf2 -k "$PASSWORDENC" -in "$ENCRYPTED_FILE" -out "RestoredBackup.zip"
 
-# Descompacta o backup
-unzip "$DECRYPTED_FILE" -d "$RESTORE_DIR" || { echo "Erro ao descompactar o arquivo."; exit 1; }
-echo "Backup restaurado com sucesso no diretório $RESTORE_DIR."
+# Verificar se o arquivo foi descriptografado com sucesso
+if [ ! -f "RestoredBackup.zip" ]; then
+    echo "Erro: Não foi possível descriptografar o arquivo de backup."
+    exit 1
+fi
 
-# Remove o arquivo zip descriptografado
-rm "$DECRYPTED_FILE"
+# Descompactar o backup
+echo "Descompactando backup..."
+unzip -o "RestoredBackup.zip" -d "$UNZIP_DIR"
 
-# Autenticação - obtendo o JWT token
+# Validar se o descompactamento foi bem-sucedido
+if [ $? -ne 0 ]; then
+    echo "Erro ao descompactar o backup."
+    exit 1
+fi
+
+# Corrigir o nível extra de diretório (se existir BackupDocker/)
+if [ -d "$UNZIP_DIR/BackupDocker" ]; then
+    echo "Corrigindo estrutura de diretórios..."
+    mv "$UNZIP_DIR/BackupDocker/"* "$UNZIP_DIR/"  # Move o conteúdo para o diretório correto
+    rm -rf "$UNZIP_DIR/BackupDocker"             # Remove o diretório adicional
+fi
+
+# Limpar arquivo compactado (opcional)
+rm "RestoredBackup.zip"
+
+# Autenticação no novo Portainer - obtendo JWT token
+echo "Autenticando no novo host do Portainer..."
 TOKEN=$(curl -s -X POST -H "Content-Type: application/json" \
   -d '{"Username": "'"$USERNAME"'", "Password": "'"$PASSWORD"'"}' \
   "$PORTAINER_HOST/api/auth" | jq -r .jwt)
 
-# Verifica se o token foi obtido
+# Validar autenticação
 if [ -z "$TOKEN" ]; then
-    echo "Falha ao obter o token de autenticação. Verifique as credenciais."
+    echo "Erro ao autenticar no Portainer. Verifique as credenciais."
     exit 1
 fi
 
-# Restaura cada stack
+# Função para converter o conteúdo do arquivo .env em JSON
+function env_to_json {
+    local env_file="$1"
+    jq -nR '[inputs | split("=") | {name: .[0], value: .[1]}]' < "$env_file"
+}
+
+# Função para reformar o conteúdo do arquivo JSON e remover quebras de linha
+function reform_json {
+    local json_file="$1"
+    jq -r '.StackFileContent' < "$json_file" | jq -sRr @json
+}
+
+# Processar cada stack no backup
 echo "Iniciando a restauração das stacks..."
+STACKS_DIR="$UNZIP_DIR"
 
-for STACK_DIR in "$RESTORE_DIR"/*/; do
-    STACK_NAME=$(basename "$STACK_DIR")
-    echo "Restaurando a stack $STACK_NAME..."
+for STACK_PATH in "$STACKS_DIR"/*; do
+    if [ -d "$STACK_PATH" ]; then
+        STACK_NAME=$(basename "$STACK_PATH")
+        CONFIG_FILE=$(find "$STACK_PATH" -type f -name "${STACK_NAME}_config_*.json")
 
-    # 1. Restaura a configuração JSON da stack
-    CONFIG_FILE="${STACK_DIR}/${STACK_NAME}_config_*.json"
-    if [ -f "$CONFIG_FILE" ]; then
-        CONFIG=$(cat "$CONFIG_FILE")
-        
-        # Cria ou atualiza a stack no Portainer
-        STACK_ID=$(curl -s -X POST -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
-            -d "{\"Name\":\"$STACK_NAME\", \"StackFileContent\":$CONFIG}" \
-            "$PORTAINER_HOST/api/stacks?type=1&method=string&endpointId=1" | jq -r .Id)
+        # Verificar se o arquivo foi encontrado
+        if [ -f "$CONFIG_FILE" ]; then
+            echo "Arquivo de configuração encontrado: $CONFIG_FILE"
+            CONFIG_CONTENT=$(reform_json "$CONFIG_FILE")
+            echo "$CONFIG_CONTENT"
 
-        if [ -n "$STACK_ID" ]; then
-            echo "Stack $STACK_NAME restaurada com ID $STACK_ID."
+            # Restaurar variáveis de ambiente (.env)
+            ENV_FILE=$(find "$STACK_PATH" -type f -name "${STACK_NAME}_env_*.env")
+            if [ -f "$ENV_FILE" ]; then
+                echo "Restaurando variáveis .env para a stack $STACK_NAME..."
+                ENV_CONTENT=$(env_to_json "$ENV_FILE")
+                echo "$ENV_CONTENT"
+            else
+                ENV_CONTENT="[]"
+                echo "Nenhum arquivo .env encontrado para a stack $STACK_NAME."
+            fi
+
+            # Criar a stack no novo host do Portainer
+            RESPONSE=$(curl -s -X POST -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
+                         -d "{
+                             \"Name\": \"$STACK_NAME\",
+                             \"StackFileContent\": $CONFIG_CONTENT,
+                             \"Env\": $ENV_CONTENT,
+                             \"Prune\": false
+                         }" \
+                         "$PORTAINER_HOST/api/stacks/create/standalone/string?endpointId=1")
+            echo "Response for stack $STACK_NAME: $RESPONSE"
         else
-            echo "Erro ao restaurar a configuração da stack $STACK_NAME."
-            continue
+            echo "Arquivo de configuração não encontrado para a stack $STACK_NAME em $STACK_PATH."
         fi
-    else
-        echo "Configuração JSON para $STACK_NAME não encontrada."
-        continue
-    fi
 
-    # 2. Restaura as variáveis de ambiente (arquivo .env)
-    ENV_FILE="${STACK_DIR}/${STACK_NAME}_env_*.env"
-    if [ -f "$ENV_FILE" ]; then
-        while IFS= read -r line; do
-            VAR_NAME=$(echo "$line" | cut -d '=' -f 1)
-            VAR_VALUE=$(echo "$line" | cut -d '=' -f 2-)
-            curl -s -X POST -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
-                -d "{\"Name\":\"$VAR_NAME\", \"Value\":\"$VAR_VALUE\"}" \
-                "$PORTAINER_HOST/api/stacks/$STACK_ID/env" > /dev/null
-        done < "$ENV_FILE"
-        echo "Variáveis de ambiente da stack $STACK_NAME restauradas."
-    else
-        echo "Arquivo .env para $STACK_NAME não encontrado."
-    fi
+        # Restaurar volumes se existirem
+        VOLUMES_DIR="$STACK_PATH/volumes"
+        if [ -d "$VOLUMES_DIR" ]; then
+            echo "Restaurando volumes associados à stack $STACK_NAME..."
+            for VOLUME_FILE in "$VOLUMES_DIR"/*.tar.gz; do
+                if [ -f "$VOLUME_FILE" ]; then
+                    VOLUME_NAME=$(basename "$VOLUME_FILE" "_backup_*.tar.gz")
+                    echo "Restaurando volume: $VOLUME_NAME..."
 
-    # 3. Restaura os volumes associados à stack
-    for VOLUME_DIR in "$STACK_DIR/volumes/"*; do
-        VOLUME_NAME=$(basename "$VOLUME_DIR")
-        if [ -d "$VOLUME_DIR" ]; then
-            # Cria o volume no Docker, caso não exista
-            docker volume create "$VOLUME_NAME" > /dev/null
+                    # Criar o volume no sistema do Docker antes de restaurar
+                    docker volume create "$VOLUME_NAME"
 
-            # Restaura o conteúdo do volume
-            docker run --rm -v "$VOLUME_NAME:/volume_data" -v "$VOLUME_DIR:/backup" alpine \
-                sh -c "cd /volume_data && tar -xzf /backup/${VOLUME_NAME}_backup_*.tar.gz" || echo "Erro ao restaurar o volume $VOLUME_NAME."
-            echo "Volume $VOLUME_NAME restaurado para a stack $STACK_NAME."
+                    # Restaurar conteúdo do volume
+                    docker run --rm -v "$VOLUME_NAME:/volume_data" -v "$(pwd):/backup" alpine \
+                        sh -c "cd /volume_data && tar -xzf /backup/$(basename $VOLUME_FILE)"
+                else
+                    echo "Nenhum arquivo de volume encontrado para $STACK_NAME. Pulando..."
+                fi
+            done
         else
-            echo "Diretório do volume $VOLUME_NAME não encontrado para a stack $STACK_NAME."
+            echo "Nenhum volume encontrado para a stack $STACK_NAME."
         fi
-    done
 
-    echo -e "Restauração da stack $STACK_NAME completa.\n\n"
+        echo -e "Restauração da stack $STACK_NAME concluída.\n"
+    fi
+done
+
+echo "Todas as stacks foram processadas!"
+
+# Finalizar limpeza
+echo "Limpando diretórios temporários..."
+rm -rf "$UNZIP_DIR"
+
+echo "Restauração concluída com sucesso!"
+
 done
 
 echo "Restauração completa de todas as stacks concluída."
