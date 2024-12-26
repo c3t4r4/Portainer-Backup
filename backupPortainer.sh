@@ -4,6 +4,7 @@
 PORTAINER_HOST="https://painel.teste.com.br" # Altere para o host e porta do seu Portainer
 USERNAME="${USERNAME:-nick}"
 PASSWORD="${PASSWORD:-!\$boré}"
+BACKUPDIR="BackupDocker"
 DESTINATION="/root/BackupPortainer"
 DATE=$(date +"%Y-%m-%d")
 DATE_TIME=$(date +"%Y%m%d_%H%M%S")
@@ -55,7 +56,7 @@ for STACK in $STACKS; do
     mkdir -p "$STACK_DIR"
 
     # 1. Exportando a configuração JSON da stack
-    CONFIG=$(curl -s -H "Authorization: Bearer $TOKEN" "$PORTAINER_HOST/api/stacks/$STACK_ID/file" | jq -c .)
+    CONFIG=$(curl -s -H "Authorization: Bearer $TOKEN" "$PORTAINER_HOST/api/stacks/$STACK_ID/file" | jq .)
     
     if [ -n "$CONFIG" ]; then
         echo "$CONFIG" > "$STACK_DIR/${STACK_NAME}_config_$DATE.json"
@@ -99,7 +100,7 @@ echo "Backup completo de todas as stacks concluído em $DESTINATION"
 
 echo "Criando arquivo ZIP"
 
-zip -r "$ZIP_FILE" "$DESTINATION" || { echo "Erro ao criar o arquivo zip."; exit 1; }
+zip -r "$ZIP_FILE" "$BACKUPDIR" || { echo "Erro ao criar o arquivo zip."; exit 1; }
 
 # Verifica se o zip foi criado com sucesso
 if [ -f "$ZIP_FILE" ]; then
@@ -113,8 +114,8 @@ if [ -f "$ZIP_FILE" ]; then
     rm "$ZIP_FILE"
     
     # Limpa o conteúdo da pasta BackupDocker após o backup e criptografia
-    rm -rf "${DESTINATION:?}/"*
-    echo "Conteúdo da pasta $DESTINATION limpo."
+    rm -rf "${BACKUPDIR:?}/"*
+    echo "Conteúdo da pasta $BACKUP_DIR limpo."
 else
     echo "Falha ao criar o arquivo zip."
 fi
