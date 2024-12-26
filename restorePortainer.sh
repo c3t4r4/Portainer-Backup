@@ -157,6 +157,18 @@ for STACK_PATH in "$STACKS_DIR"/*; do
                 echo "Nenhum arquivo .env encontrado para a stack $STACK_NAME."
             fi
 
+            # Verificar se o arquivo ResourceControl.json existe
+            if [ -f "$STACK_PATH/ResourceControl.json" ]; then
+                # Ler o conteúdo do arquivo ResourceControl.json
+                ResourceControl=$(cat "$STACK_PATH/ResourceControl.json" | tr -d '\n')
+            else
+                # Definir valores padrão se o arquivo não existir
+                ResourceControl='{
+                    \"Public\": true,
+                    \"AdministratorsOnly\": false
+                }'
+            fi
+
             # Criar a stack no novo host do Portainer
             RESPONSE=$(curl -s -X POST -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
                         -d "{
@@ -164,6 +176,8 @@ for STACK_PATH in "$STACKS_DIR"/*; do
                                 \"fromAppTemplate\": false,
                                 \"StackFileContent\": $CONFIG_CONTENT,
                                 \"Env\": $ENV_CONTENT,
+                                \"swarmID\": \"$SWARM_ID\",
+                                \"ResourceControl\": $ResourceControl,
                                 \"Prune\": false
                         }" \
                         "$PORTAINER_HOST/api/stacks/create/swarm/string?endpointId=1")
