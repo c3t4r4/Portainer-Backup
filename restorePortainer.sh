@@ -21,6 +21,7 @@ DEST_DIR="/root/${UNZIP_DIR}"
 PORTAINER_HOST="http://localhost:9000" # Altere para o novo host do Portainer
 USERNAME="${USERNAME:-nick}"
 PASSWORD="${PASSWORD:-!\$boré}"
+DOCKER_VOLUMES_DIR="/var/lib/docker/volumes"
 
 # Verificar se o arquivo de backup existe
 if [ ! -f "$ENCRYPTED_FILE" ]; then
@@ -61,11 +62,56 @@ fi
 # Limpar arquivo compactado (opcional)
 rm "RestoredBackup.zip"
 
+# Restaurando Volumes
+# Iterar sobre cada arquivo de backup no diretório de backups
+for backup_file in "$VOLUMES_DIR"/*.zip; do
+    # Verificar se existem arquivos .zip
+    if [[ ! -e $backup_file ]]; then
+        echo "Não foram encontrados arquivos de backup no diretório $VOLUMES_DIR."
+        exit 0
+    fi
+
+    # Obter o nome do volume a partir do nome do arquivo de backup
+    # Exemplo: "volume_name_backup.zip" -> "volume_name"
+    backup_filename=$(basename "$backup_file")
+    volume_name=$(echo "$backup_filename" | sed -E 's/_backup.zip//')
+
+    echo "Processando o arquivo de backup: $backup_file"
+    echo "Volume a ser restaurado: $volume_name"
+
+    # Verificar se já existe um volume com o mesmo nome
+    if [[ -d "$DOCKER_VOLUMES_DIR/$volume_name" ]]; then
+        echo "Aviso: Já existe um volume com o nome '$volume_name' em $DOCKER_VOLUMES_DIR."
+        echo "Você deseja substituir o volume existente? (s/n)"
+        read -r replace
+
+        if [[ "$replace" != "s" && "$replace" != "S" ]]; then
+        echo "Pulado: O volume '$volume_name' não será restaurado."
+        continue
+        else
+        # Remover o volume existente antes de restaurar
+        echo "Removendo o volume existente: $DOCKER_VOLUMES_DIR/$volume_name"
+        rm -rf "$DOCKER_VOLUMES_DIR/$volume_name"
+        fi
+    fi
+
+    # Restaurar o volume a partir do backup
+    echo "Restaurando o volume $volume_name..."
+    unzip -o "$backup_file" -d "/"
+
+    # Confirmar se a restauração foi bem-sucedida
+    if [[ $? -eq 0 ]]; then
+        echo "Restauração concluída para o volume: $volume_name."
+    else
+        echo "Erro: Falha ao restaurar o volume: $volume_name."
+    fi
+done
+
 # Autenticação no novo Portainer - obtendo JWT token
 echo "Autenticando no novo host do Portainer..."
 TOKEN=$(curl -s -X POST -H "Content-Type: application/json" \
-  -d '{"Username": "'"$USERNAME"'", "Password": "'"$PASSWORD"'"}' \
-  "$PORTAINER_HOST/api/auth" | jq -r .jwt)
+    -d '{"Username": "'"$USERNAME"'", "Password": "'"$PASSWORD"'"}' \
+    "$PORTAINER_HOST/api/auth" | jq -r .jwt)
 
 # Validar autenticação
 if [ -z "$TOKEN" ]; then
@@ -113,39 +159,17 @@ for STACK_PATH in "$STACKS_DIR"/*; do
 
             # Criar a stack no novo host do Portainer
             RESPONSE=$(curl -s -X POST -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
-                         -d "{
-                             \"Name\": \"$STACK_NAME\",
-                             \"StackFileContent\": $CONFIG_CONTENT,
-                             \"Env\": $ENV_CONTENT,
-                             \"Prune\": false
-                         }" \
-                         "$PORTAINER_HOST/api/stacks/create/standalone/string?endpointId=1")
+                        -d "{
+                                \"Name\": \"$STACK_NAME\",
+                                \"fromAppTemplate\": false,
+                                \"StackFileContent\": $CONFIG_CONTENT,
+                                \"Env\": $ENV_CONTENT,
+                                \"Prune\": false
+                        }" \
+                        "$PORTAINER_HOST/api/stacks/create/swarm/string?endpointId=1")
             echo "Response for stack $STACK_NAME: $RESPONSE"
         else
             echo "Arquivo de configuração não encontrado para a stack $STACK_NAME em $STACK_PATH."
-        fi
-
-        # Restaurar volumes se existirem
-        VOLUMES_DIR="$STACK_PATH/volumes"
-        if [ -d "$VOLUMES_DIR" ]; then
-            echo "Restaurando volumes associados à stack $STACK_NAME..."
-            for VOLUME_FILE in "$VOLUMES_DIR"/*.tar.gz; do
-                if [ -f "$VOLUME_FILE" ]; then
-                    VOLUME_NAME=$(basename "$VOLUME_FILE" "_backup_*.tar.gz")
-                    echo "Restaurando volume: $VOLUME_NAME..."
-
-                    # Criar o volume no sistema do Docker antes de restaurar
-                    docker volume create "$VOLUME_NAME"
-
-                    # Restaurar conteúdo do volume
-                    docker run --rm -v "$VOLUME_NAME:/volume_data" -v "$(pwd):/backup" alpine \
-                        sh -c "cd /volume_data && tar -xzf /backup/$(basename $VOLUME_FILE)"
-                else
-                    echo "Nenhum arquivo de volume encontrado para $STACK_NAME. Pulando..."
-                fi
-            done
-        else
-            echo "Nenhum volume encontrado para a stack $STACK_NAME."
         fi
 
         echo -e "Restauração da stack $STACK_NAME concluída.\n"
@@ -159,7 +183,5 @@ echo "Limpando diretórios temporários..."
 rm -rf "$UNZIP_DIR"
 
 echo "Restauração concluída com sucesso!"
-
-done
 
 echo "Restauração completa de todas as stacks concluída."
