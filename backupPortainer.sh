@@ -70,11 +70,11 @@ for item in "$DOCKER_VOLUMES_DIR"/*; do
         # Criar o arquivo tar.gz com o nome do volume e a data no destino de backup
         #BACKUP_FILE="${VOLUMES}/${VOLUME_NAME}_backup.zip"
         BACKUP_FILE="${VOLUMES}/${VOLUME_NAME}_backup.tar.gz"
-        echo "Criando backup do volume: $DOCKER_VOLUMES_DIR/$VOLUME_NAME -> $BACKUP_FILE"
+        echo "Criando backup do volume: $DOCKER_VOLUMES_DIR/$VOLUME_NAME -> $BACKUP_FILE \n\n"
 
         # Compactar o conteúdo do volume em formato tar.gz
         #zip -r "$BACKUP_FILE" "$DOCKER_VOLUMES_DIR/$VOLUME_NAME"
-        tar -czpf "$BACKUP_FILE" -C  "$DOCKER_VOLUMES_DIR/$VOLUME_NAME"
+        tar -czpf "$BACKUP_FILE" -C  "$DOCKER_VOLUMES_DIR" "$VOLUME_NAME"
     fi
 done
 

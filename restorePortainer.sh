@@ -103,7 +103,7 @@ for backup_file in "$VOLUMES_DIR"/*.tar.gz; do  # Verificar se existem arquivos 
     #unzip -o "$backup_file" -d "/"
 
     # Restaurando .tar.gz "$DOCKER_VOLUMES_DIR"
-    tar -xzpf "$backup_file" -C "/"
+    tar -xzpf "$backup_file" -C "$DOCKER_VOLUMES_DIR/"
 
     # Confirmar se a restauração foi bem-sucedida
     if [[ $? -eq 0 ]]; then
@@ -201,6 +201,9 @@ echo "Todas as stacks foram processadas!"
 # Finalizar limpeza
 echo "Limpando diretórios temporários..."
 rm -rf "$UNZIP_DIR"
+
+echo "Corrigindo Permissão Mysql Data"
+chown 1001:root /var/lib/docker/volumes/mysql_data/_data
 
 echo "Restauração concluída com sucesso!"
 
