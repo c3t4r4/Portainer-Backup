@@ -64,8 +64,9 @@ rm "RestoredBackup.zip"
 
 # Restaurando Volumes
 # Iterar sobre cada arquivo de backup no diretório de backups
-for backup_file in "$VOLUMES_DIR"/*.zip; do
-    # Verificar se existem arquivos .zip
+#for backup_file in "$VOLUMES_DIR"/*.zip; do # Verificar se existem arquivos .zip
+for backup_file in "$VOLUMES_DIR"/*.tar.gz; do  # Verificar se existem arquivos tar.gz
+    
     if [[ ! -e $backup_file ]]; then
         echo "Não foram encontrados arquivos de backup no diretório $VOLUMES_DIR."
         exit 0
@@ -74,7 +75,7 @@ for backup_file in "$VOLUMES_DIR"/*.zip; do
     # Obter o nome do volume a partir do nome do arquivo de backup
     # Exemplo: "volume_name_backup.zip" -> "volume_name"
     backup_filename=$(basename "$backup_file")
-    volume_name=$(echo "$backup_filename" | sed -E 's/_backup.zip//')
+    volume_name=$(echo "$backup_filename" | sed -E 's/_backup.tar.gz//')
 
     echo "Processando o arquivo de backup: $backup_file"
     echo "Volume a ser restaurado: $volume_name"
@@ -97,7 +98,12 @@ for backup_file in "$VOLUMES_DIR"/*.zip; do
 
     # Restaurar o volume a partir do backup
     echo "Restaurando o volume $volume_name..."
-    unzip -o "$backup_file" -d "/"
+
+    # Restaurando .zip
+    #unzip -o "$backup_file" -d "/"
+
+    # Restaurando .tar.gz "$DOCKER_VOLUMES_DIR"
+    tar -xzpf "$backup_file" -C "/"
 
     # Confirmar se a restauração foi bem-sucedida
     if [[ $? -eq 0 ]]; then
