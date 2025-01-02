@@ -165,8 +165,8 @@ if [ -f "$ZIP_FILE" ]; then
     rm "$ZIP_FILE"
     
     # Limpa o conteúdo da pasta BackupDocker após o backup e criptografia
-    rm -rf "BACKUPDIR"
-    echo "Conteúdo da pasta $BACKUP_DIR limpo."
+    rm -rf "${BACKUPDIR}"
+    echo "Conteúdo da pasta ${BACKUPDIR} limpo."
 else
     echo "Falha ao criar o arquivo zip."
 fi
