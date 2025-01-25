@@ -171,7 +171,8 @@ for STACK_PATH in "$STACKS_DIR"/*; do
                 # Definir valores padrão se o arquivo não existir
                 ResourceControl='{
                     \"Public\": true,
-                    \"AdministratorsOnly\": false
+                    \"AdministratorsOnly\": false,
+                    \"Type\": 6,
                 }'
             fi
 
@@ -179,12 +180,14 @@ for STACK_PATH in "$STACKS_DIR"/*; do
             RESPONSE=$(curl -s -X POST -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
                         -d "{
                                 \"Name\": \"$STACK_NAME\",
-                                \"fromAppTemplate\": false,
+                                \"FromAppTemplate\": false,
+                                \"EntryPoint\": \"docker-compose.yml\",
                                 \"StackFileContent\": $CONFIG_CONTENT,
                                 \"Env\": $ENV_CONTENT,
-                                \"swarmID\": \"$SWARM_ID\",
+                                \"SwarmId\": \"$SWARM_ID\",
                                 \"ResourceControl\": $ResourceControl,
-                                \"Prune\": false
+                                \"Prune\": false,
+                                \"CreatedBy\": \"c3t4r4\",
                         }" \
                         "$PORTAINER_HOST/api/stacks/create/swarm/string?endpointId=1")
             echo "Response for stack $STACK_NAME: $RESPONSE"
